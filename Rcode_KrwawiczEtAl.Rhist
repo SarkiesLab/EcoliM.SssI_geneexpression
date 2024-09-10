@@ -1,0 +1,96 @@
+#JK RNAseq repeats
+
+load("GeneInfoRawCounts")
+load("RawCountsData.Rdata")
+
+ColInfo<-read.table(text=colnames(OutputFile), sep="_")
+
+ColInfo[grep("H", ColInfo[,3]),3]<-"H2O2"
+ColInfo[-grep("H", ColInfo[,3]),3]<-"Control"
+
+SimpleInfo<-paste(ColInfo[,1],ColInfo[,2],ColInfo[,3], sep="_")
+
+ColInfoSimp<-data.frame(colnames(OutputFile),SimpleInfo)
+colnames(ColInfoSimp)<-c("sample","group")
+
+library(DESeq2)
+
+CDS_simp<-DESeqDataSetFromMatrix(OutputFile, colData=ColInfoSimp,design=~group)
+
+CDS_simp<-DESeq(CDS_simp)
+
+#there are several questions to ask with this data
+
+#the first is to investigate whether H2O2 induces catalase as normal in the presence of mSSSI compared to no mSSSI
+
+#the complicating factor here is that arabinose also may have an effect on induction
+
+MT_H2O2Res<-results(CDS_simp, c("group","Ara_MSssI_H2O2","Ara_MSssI_Control"))
+noMT_H2O2Res<-results(CDS_simp, c("group","Glu_MSssI_H2O2","Glu_MSssI_Control"))
+
+Ara_H2O2Res<-results(CDS_simp, c("group","Ara_Empty_H2O2","Ara_Empty_Control"))
+Glu_H2O2Res<-results(CDS_simp,c("group","Glu_Empty_H2O2","Glu_Empty_Control"))
+
+
+
+Cat<-grep("kat",RowInfo[,2])
+par(mfrow=c(1,1))
+plot(noMT_H2O2Res$log2FoldChange,MT_H2O2Res$log2FoldChange,pch=16,xlab="log2H2o2/control no mSSSI",ylab="log2H2o2/control mSSSI",ylim=c(-6,6),xlim=c(-6,6))
+points(noMT_H2O2Res$log2FoldChange[Cat],MT_H2O2Res$log2FoldChange[Cat],pch=16,col="red")
+legend("topright", "Catalase genes", col="red", pch=16,cex=0.8)
+dev.copy(pdf, "catalase_genes_H2O2inductmSSSIvsnomSSSI.pdf")
+dev.off()
+plot(Glu_H2O2Res$log2FoldChange,Ara_H2O2Res$log2FoldChange, pch=16, xlab="log2H2o2/control Glu",ylab="log2H2o2/control Ara",ylim=c(-6,6),xlim=c(-6,6))
+
+points(Glu_H2O2Res$log2FoldChange[Cat],Ara_H2O2Res$log2FoldChange[Cat], pch=16, col="red")
+legend("topright", "Catalase genes", col="red", pch=16,cex=0.8)
+dev.copy(pdf, "catalase_genes_H2O2inductAravGlu.pdf")
+dev.off()
+#similar induction of both catalase genes when mSSSI is active or not.
+#certainly implies that there is no failure to induce catalase as a result of MT activity. 
+
+#the next question is whether if we compare mSSSI induced against non induced (in the abscence of H2O2) do we see induction of ada genes ie alkB? 
+
+MT_v_noMT_noH2O2<-results(CDS_simp, c("group", "Ara_MSssI_Control","Glu_MSssI_Control"))
+Ara_v_Glu_noH2O2<-results(CDS_simp, c("group", "Ara_Empty_Control","Glu_Empty_Control"))
+
+AdaGenes<-c(grep("Name=ada;",RowInfo[,2]),grep("Name=alkA;",RowInfo[,2]),grep("Name=alkB;",RowInfo[,2]))
+
+#volcano plot to see
+
+plot(MT_v_noMT_noH2O2$log2FoldChange, -log10(MT_v_noMT_noH2O2$padj), pch=16, xlab="log2FoldChange_MTvnoMT",ylab="log10_padj")
+
+ColAda<-c("purple","cyan","hotpink")
+
+points(MT_v_noMT_noH2O2$log2FoldChange[AdaGenes], -log10(MT_v_noMT_noH2O2$padj)[AdaGenes],pch=16,col=ColAda)
+legend("bottomleft", c("Ada","AlkA","AlkB"), col=ColAda, pch=16,cex=0.8)
+dev.copy(pdf, "Ada_genes_mSSSI_induction.pdf")
+dev.off()
+
+#is it the same just ara v glu
+
+plot(Ara_v_Glu_noH2O2$log2FoldChange,MT_v_noMT_noH2O2$log2FoldChange,xlab="log2Ara/Glu",ylab="log2MTinduced/MTrepressed",pch=16)
+points(Ara_v_Glu_noH2O2$log2FoldChange[AdaGenes],MT_v_noMT_noH2O2$log2FoldChange[AdaGenes],col=ColAda,pch=16)
+legend("topleft", c("Ada","AlkA","AlkB"), col=ColAda, pch=16,cex=0.8)
+#can see clearly that the ara v glu comparison does not have the same effect
+dev.copy(pdf, "Ada_genes_MTspecificity.pdf")
+dev.off()
+
+
+#to more systematically identify genes that are caused by the MT induction changing
+
+SigMTNOTara<-MT_v_noMT_noH2O2[which(MT_v_noMT_noH2O2$padj<1e-3&Ara_v_Glu_noH2O2$padj>0.1),]
+
+UpReg<-SigMTNOTara[which(SigMTNOTara$log2FoldChange>1),]
+
+UpRegGenes<-c()
+for(i in 1:nrow(UpReg)){InfoTemp<-RowInfo[which(RowInfo[,1]==row.names(UpReg)[i]),2];Q<-unlist(strsplit(InfoTemp,";"));A<-Q[grep("Name=",Q)];if(length(A==1)){UpRegGenes<-c(UpRegGenes,substr(A, 6, nchar(A)))}else{UpRegGenes<-c(UpRegGenes, Q[1])}}
+
+L<-grep("ID=", UpRegGenes)
+UpRegGenes[L]<-substr(UpRegGenes[L],9, nchar(UpRegGenes[L]))
+UpRegGenes<-UpRegGenes[-grep("external", UpRegGenes)]
+write.table(UpRegGenes,"mSSSI_upregGenes_control.txt", sep="\t", quote=F, row.names=F, col.names=F)
+
+
+plot(Ara_H2O2Res$log2FoldChange, -log10(Ara_H2O2Res$log2FoldChange$padj), pch=16, xlab="log2FoldChange_MTH2O2",ylab="log10_padj")
+points(MT_v_noMT_noH2O2$log2FoldChange[Cat], -log10(MT_v_noMT_noH2O2$padj)[Cat],pch=16,col="red")
